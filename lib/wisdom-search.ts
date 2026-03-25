@@ -1,10 +1,6 @@
-import path from "path";
-import fs from "fs";
-import { WisdomStore, WisdomUnit, SearchResult } from "@/types/wisdom";
-import { cosineSimilarity } from "./embeddings";
+import { supabase } from "./supabase";
+import { SearchResult, WisdomUnit } from "@/types/wisdom";
 import { embedText } from "./gemini";
-
-let _store: WisdomStore | null = null;
 
 // Map of recognized brother names to their full author strings in the data
 const BROTHER_ALIASES: Record<string, string[]> = {
@@ -33,64 +29,43 @@ function detectBrother(query: string): string[] | null {
   return null;
 }
 
-export function loadStore(): WisdomStore {
-  if (_store) return _store;
-
-  const candidates = [
-    path.join(process.cwd(), "data", "wisdom.json"),
-    path.join(process.cwd(), "kings-chamber", "data", "wisdom.json"),
-    path.resolve(__dirname, "..", "data", "wisdom.json"),
-  ];
-
-  const foundPath = candidates.find((p) => fs.existsSync(p));
-
-  if (!foundPath) {
-    console.warn("wisdom.json not found. Tried:", candidates);
-    return { generated_at: "", total_units: 0, units: [] };
-  }
-
-  console.log(`Loading wisdom store from: ${foundPath}`);
-  const raw = fs.readFileSync(foundPath, "utf-8");
-  _store = JSON.parse(raw) as WisdomStore;
-  console.log(`Loaded ${_store.total_units} wisdom units`);
-  return _store;
-}
-
 export async function searchWisdom(
   query: string,
   topK: number = 5
 ): Promise<SearchResult[]> {
-  const store = loadStore();
-  if (store.units.length === 0) return [];
-
   const queryEmbedding = await embedText(query);
   const brotherNames = detectBrother(query);
 
-  let pool: WisdomUnit[];
-  if (brotherNames) {
-    // Filter to only this brother's wisdom
-    pool = store.units.filter((u) =>
-      u.authors.some((a) => brotherNames.includes(a))
-    );
-    // If too few results from this brother, fall back to full pool
-    if (pool.length < topK) {
-      pool = store.units;
-    }
-  } else {
-    pool = store.units;
+  const { data, error } = await supabase.rpc("match_wisdom", {
+    query_embedding: JSON.stringify(queryEmbedding),
+    match_count: topK,
+    filter_authors: brotherNames,
+  });
+
+  if (error) {
+    console.error("Supabase search error:", error.message);
+    return [];
   }
 
-  const scored = pool.map((unit) => ({
-    unit,
-    score: cosineSimilarity(queryEmbedding, unit.embedding),
+  return (data || []).map((row: Record<string, unknown>) => ({
+    unit: {
+      id: row.id as string,
+      text: row.text as string,
+      authors: row.authors as string[],
+      primary_author: row.primary_author as string,
+      source_preview: row.source_preview as string,
+      theme: row.theme as string,
+      created_at: row.created_at as string,
+      embedding: [],
+    } as WisdomUnit,
+    score: row.similarity as number,
   }));
-
-  return scored.sort((a, b) => b.score - a.score).slice(0, topK);
 }
 
-export function getDailyWisdom() {
-  const store = loadStore();
-  if (store.units.length === 0) {
+export async function getDailyWisdom() {
+  const { data, error } = await supabase.rpc("get_daily_wisdom");
+
+  if (error || !data || data.length === 0) {
     return {
       quote:
         "The Chamber is being prepared. Return when the wisdom has been gathered.",
@@ -98,12 +73,61 @@ export function getDailyWisdom() {
       theme: "patience",
     };
   }
-  const dayIndex =
-    Math.floor(Date.now() / 86400000) % store.units.length;
-  const unit = store.units[dayIndex];
+
   return {
-    quote: unit.text,
-    author: unit.primary_author,
-    theme: unit.theme,
+    quote: data[0].quote,
+    author: data[0].author,
+    theme: data[0].theme,
   };
+}
+
+export async function getAllBrothers() {
+  const { data, error } = await supabase
+    .from("wisdom_units")
+    .select("text, authors, primary_author, theme");
+
+  if (error || !data) {
+    console.error("Failed to load brothers:", error?.message);
+    return { brothers: [], totalWisdom: 0 };
+  }
+
+  const brotherMap: Record<
+    string,
+    { count: number; themes: Record<string, number>; topQuotes: string[] }
+  > = {};
+
+  for (const unit of data) {
+    for (const author of unit.authors) {
+      if (!brotherMap[author]) {
+        brotherMap[author] = { count: 0, themes: {}, topQuotes: [] };
+      }
+      const b = brotherMap[author];
+      b.count++;
+      b.themes[unit.theme] = (b.themes[unit.theme] || 0) + 1;
+      if (b.topQuotes.length < 5) {
+        b.topQuotes.push(unit.text);
+      }
+    }
+  }
+
+  const brothers = Object.entries(brotherMap)
+    .map(([name, d]) => {
+      const firstName = name.split(" ")[0];
+      const sortedThemes = Object.entries(d.themes)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([theme, count]) => ({ theme, count }));
+
+      return {
+        name,
+        displayName: `Brother ${firstName}`,
+        slug: firstName.toLowerCase(),
+        wisdomCount: d.count,
+        dominantThemes: sortedThemes,
+        topQuotes: d.topQuotes,
+      };
+    })
+    .sort((a, b) => b.wisdomCount - a.wisdomCount);
+
+  return { brothers, totalWisdom: data.length };
 }

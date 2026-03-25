@@ -3,7 +3,7 @@ import { getDailyWisdom } from "@/lib/wisdom-search";
 
 export async function GET() {
   try {
-    const wisdom = getDailyWisdom();
+    const wisdom = await getDailyWisdom();
     return NextResponse.json(wisdom);
   } catch (error) {
     console.error("Daily wisdom error:", error);

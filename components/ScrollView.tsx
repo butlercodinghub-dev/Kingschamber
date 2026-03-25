@@ -1,53 +1,66 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { SavedQuote } from "@/types/wisdom";
 import GoldDivider from "./ui/GoldDivider";
 
-const STORAGE_KEY = "kings-chamber-scroll";
-
 export function useSavedQuotes() {
-  const getQuotes = (): SavedQuote[] => {
-    if (typeof window === "undefined") return [];
-    try {
-      return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-    } catch {
-      return [];
-    }
+  const saveQuote = async (quote: Omit<SavedQuote, "id" | "saved_at">) => {
+    await fetch("/api/scroll", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(quote),
+    });
   };
 
-  const saveQuote = (quote: Omit<SavedQuote, "id" | "saved_at">) => {
-    const quotes = getQuotes();
-    const newQuote: SavedQuote = {
-      ...quote,
-      id: crypto.randomUUID(),
-      saved_at: new Date().toISOString(),
-    };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify([newQuote, ...quotes]));
+  const removeQuote = async (id: string) => {
+    await fetch(`/api/scroll?id=${id}`, { method: "DELETE" });
   };
 
-  const removeQuote = (id: string) => {
-    const quotes = getQuotes().filter((q) => q.id !== id);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(quotes));
-  };
-
-  return { getQuotes, saveQuote, removeQuote };
+  return { saveQuote, removeQuote };
 }
 
 export default function ScrollView() {
   const [quotes, setQuotes] = useState<SavedQuote[]>([]);
-  const { getQuotes, removeQuote } = useSavedQuotes();
+  const [loading, setLoading] = useState(true);
+  const { removeQuote } = useSavedQuotes();
 
-  useEffect(() => {
-    setQuotes(getQuotes());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  const fetchQuotes = useCallback(async () => {
+    try {
+      const res = await fetch("/api/scroll");
+      const data = await res.json();
+      setQuotes(data);
+    } catch {
+      setQuotes([]);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const handleRemove = (id: string) => {
-    removeQuote(id);
-    setQuotes(getQuotes());
+  useEffect(() => {
+    fetchQuotes();
+  }, [fetchQuotes]);
+
+  const handleRemove = async (id: string) => {
+    await removeQuote(id);
+    setQuotes((prev) => prev.filter((q) => q.id !== id));
   };
+
+  if (loading) {
+    return (
+      <div className="flex justify-center gap-2 py-20">
+        {[0, 1, 2].map((i) => (
+          <motion.div
+            key={i}
+            className="w-2 h-2 rounded-full bg-chamber-gold"
+            animate={{ opacity: [0.3, 1, 0.3] }}
+            transition={{ duration: 2, repeat: Infinity, delay: i * 0.4 }}
+          />
+        ))}
+      </div>
+    );
+  }
 
   if (quotes.length === 0) {
     return (

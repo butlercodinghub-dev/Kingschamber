@@ -43,9 +43,9 @@ export default function Chamber() {
     }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!response) return;
-    saveQuote({
+    await saveQuote({
       quote: response.quote,
       author: response.author,
       theme: response.theme,
