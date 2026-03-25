@@ -28,6 +28,9 @@ yarn-error.log*
 # local env files
 .env*.local
 
+# wisdom pipeline data (too large for git, regenerate with scripts/)
+/data/
+
 # vercel
 .vercel
 
