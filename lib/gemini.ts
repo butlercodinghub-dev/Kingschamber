@@ -1,15 +1,18 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
-const apiKey = process.env.GEMINI_API_KEY!;
-const genAI = new GoogleGenerativeAI(apiKey);
+function getGenAI() {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error("Missing GEMINI_API_KEY env var");
+  return new GoogleGenerativeAI(apiKey);
+}
 
-export const flashModel = genAI.getGenerativeModel({
-  model: "gemini-2.5-flash-lite",
-});
+function getFlashModel() {
+  return getGenAI().getGenerativeModel({ model: "gemini-2.5-flash-lite" });
+}
 
-export const embeddingModel = genAI.getGenerativeModel({
-  model: "gemini-embedding-001",
-});
+function getEmbeddingModel() {
+  return getGenAI().getGenerativeModel({ model: "gemini-embedding-001" });
+}
 
 // Retry wrapper for Gemini API calls
 async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
@@ -35,7 +38,7 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
 
 export async function embedText(text: string): Promise<number[]> {
   return withRetry(async () => {
-    const result = await embeddingModel.embedContent({
+    const result = await getEmbeddingModel().embedContent({
       content: { parts: [{ text }], role: "user" },
       taskType: "SEMANTIC_SIMILARITY" as never,
     });
@@ -70,7 +73,7 @@ Return ONLY valid JSON with no markdown, no code blocks:
 {"quote": "...", "author": "Brother Name or Council of Kings", "theme": "..."}`;
 
   return withRetry(async () => {
-    const result = await flashModel.generateContent(prompt);
+    const result = await getFlashModel().generateContent(prompt);
     const raw = result.response.text().trim();
     const cleaned = raw
       .replace(/^```json?\s*/i, "")
@@ -110,7 +113,7 @@ The seeker wishes to go deeper. Expand this wisdom into a 3-5 sentence philosoph
 Return ONLY the expanded reflection text, no JSON, no quotes, no attribution.`;
 
   return withRetry(async () => {
-    const result = await flashModel.generateContent(prompt);
+    const result = await getFlashModel().generateContent(prompt);
     return result.response.text().trim();
   });
 }

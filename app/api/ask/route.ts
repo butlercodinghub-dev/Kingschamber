@@ -37,13 +37,16 @@ export async function POST(req: NextRequest) {
     const response = await synthesizeWisdom(question, wisdomUnits);
     return NextResponse.json({ ...response, sources });
   } catch (error) {
-    console.error("Ask route error:", error);
+    const errMsg = error instanceof Error ? error.message : String(error);
+    const errStack = error instanceof Error ? error.stack : "";
+    console.error("Ask route error:", errMsg, errStack);
     return NextResponse.json(
       {
         quote:
           "The Chamber is momentarily silent. A king does not repeat himself — he waits.",
         author: "Council of Kings",
         theme: "patience",
+        _debug: process.env.NODE_ENV === "development" ? errMsg : undefined,
       },
       { status: 200 }
     );
